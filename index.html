@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>만화 & 소설 뷰어</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #000; color: #e0e0e0; height: 100vh; width: 100vw; display: flex; flex-direction: column; overflow: hidden; }
+    
+    header { position: absolute; top: 0; left: 0; right: 0; background: rgba(0, 0, 0, 0.9); padding: 0.5rem 0.8rem; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; z-index: 30; transition: transform 0.2s ease; gap: 0.4rem; }
+    header.hidden { transform: translateY(-100%); }
+    h1 { font-size: 0.9rem; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+    .btn-group { display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; }
+    .btn { background: #333; color: #fff; border: none; padding: 0.35rem 0.5rem; border-radius: 4px; font-size: 0.75rem; cursor: pointer; white-space: nowrap; }
+    .btn-primary { background: #2563eb; font-weight: bold; }
+    input[type="file"] { display: none; }
+
+    .app-body { position: relative; flex: 1; width: 100%; height: 100%; overflow: hidden; }
+    
+    .sidebar { position: absolute; top: 0; left: 0; bottom: 0; width: 300px; max-width: 85vw; background: rgba(26, 26, 26, 0.95); border-right: 1px solid #333; display: flex; flex-direction: column; z-index: 40; transform: translateX(-100%); transition: transform 0.2s ease; backdrop-filter: blur(10px); }
+    .sidebar.open { transform: translateX(0); }
+    .sidebar-header { padding: 0.8rem; background: #222; font-size: 0.85rem; font-weight: bold; color: #aaa; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; }
+    .file-tree { flex: 1; overflow-y: auto; padding: 0.5rem; list-style: none; }
+    .file-item { padding: 0.7rem 0.8rem; border-radius: 4px; font-size: 0.85rem; cursor: pointer; display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; color: #ccc; word-break: break-all; }
+    .file-item:active, .file-item.active { background: #2563eb; color: #fff; }
+
+    .viewer-container { width: 100%; height: 100%; display: flex; flex-direction: column; background: #000; position: relative; overflow: hidden; touch-action: pan-y; outline: none; }
+    
+    .reader-controls { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.85); padding: 0.6rem 1rem; display: flex; justify-content: space-between; align-items: center; z-index: 30; transition: transform 0.2s ease; }
+    .reader-controls.hidden { transform: translateY(100%); }
+
+    .content-area { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; position: relative; }
+    
+    .novel-view { width: 100%; height: 100%; padding: 4.5rem 1.5rem 4rem 1.5rem; overflow: hidden; font-size: 16px; line-height: 1.8; color: #d1d5db; white-space: pre-wrap; word-break: break-all; user-select: text; }
+    .manga-view { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background: #000; overflow: hidden; position: relative; }
+    .manga-img { width: 100%; height: 100%; object-fit: contain; }
+
+    .touch-zone { position: absolute; top: 0; bottom: 0; z-index: 10; }
+    .touch-left { left: 0; width: 30%; }
+    .touch-center { left: 30%; width: 40%; }
+    .touch-right { right: 0; width: 30%; }
+
+    .empty-state { text-align: center; color: #888; padding: 2rem; font-size: 0.9rem; }
+    .toast { position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%); background: #2563eb; color: #fff; padding: 0.6rem 1.2rem; border-radius: 20px; font-size: 0.85rem; z-index: 50; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+    .toast.show { opacity: 1; }
+    .loading-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 100; color: #fff; font-size: 1rem; }
+  </style>
+</head>
+<body tabindex="0">
+  <div id="loading" class="loading-overlay" style="display:none;">파일을 분석하는 중입니다...</div>
+  
+  <header id="header">
+    <h1 id="title">만화/소설 뷰어</h1>
+    <div class="btn-group">
+      <button class="btn" id="toggleSidebar">📁 목록</button>
+      <button class="btn" id="directionBtn">오른쪽 ➔</button>
+      <button class="btn" id="fontBtn" style="display:none;">글자 크기</button>
+      <label class="btn btn-primary">
+        열기
+        <input type="file" id="fileInput" accept=".zip,.txt,.png,.jpg,.jpeg,.webp">
+      </label>
+    </div>
+  </header>
+
+  <div class="app-body">
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span>파일 목록</span>
+        <span id="fileCount">0개</span>
+      </div>
+      <ul class="file-tree" id="fileList">
+        <div class="empty-state">ZIP, TXT, 이미지 파일 선택 가능</div>
+      </ul>
+    </div>
+
+    <div class="viewer-container" id="viewerContainer" tabindex="0">
+      <div class="touch-zone touch-left" id="touchLeft"></div>
+      <div class="touch-zone touch-center" id="touchCenter"></div>
+      <div class="touch-zone touch-right" id="touchRight"></div>
+
+      <div class="content-area" id="contentArea">
+        <div class="empty-state">우측 상단 '열기'를 눌러 파일을 불러오세요.</div>
+      </div>
+
+      <div class="reader-controls" id="readerControls">
+        <button class="btn" id="prevBtn">◀ 이전</button>
+        <span id="pageIndicator" style="font-size:0.85rem; color:#fff;">0 / 0</span>
+        <button class="btn" id="nextBtn">다음 ▶</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let zipEntries = [], pageList = [], currentVirtualIndex = -1, fontSize = 16, currentFileName = "", uiVisible = true, readRTL = false;
+    const PAGE_CHAR_SIZE = 800; // TXT B방식 글자수 분할
+
+    const fileInput = document.getElementById('fileInput'), fileListEl = document.getElementById('fileList'), contentArea = document.getElementById('contentArea'), titleEl = document.getElementById('title'), readerControls = document.getElementById('readerControls'), header = document.getElementById('header'), pageIndicator = document.getElementById('pageIndicator'), sidebar = document.getElementById('sidebar'), toast = document.getElementById('toast'), directionBtn = document.getElementById('directionBtn'), loadingEl = document.getElementById('loading'), viewerContainer = document.getElementById('viewerContainer');
+
+    // 키 포커스 강제유지
+    window.addEventListener('click', () => { window.focus(); viewerContainer.focus(); });
+
+    directionBtn.addEventListener('click', () => {
+      readRTL = !readRTL;
+      directionBtn.innerText = readRTL ? "오른쪽 ➔" : "➔ 왼쪽";
+      showToast(readRTL ? "읽기 방향: 우➔좌" : "읽기 방향: 좌➔우");
+      if (currentVirtualIndex !== -1) renderPage(currentVirtualIndex);
+    });
+
+    document.getElementById('toggleSidebar').addEventListener('click', (e) => { e.stopPropagation(); sidebar.classList.toggle('open'); });
+
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      loadingEl.style.display = 'flex';
+      pageList = []; currentFileName = file.name; titleEl.innerText = file.name;
+
+      try {
+        if (file.name.toLowerCase().endsWith('.txt')) {
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            const fullText = evt.target.result;
+            for (let i = 0; i < fullText.length; i += PAGE_CHAR_SIZE) {
+              pageList.push({ type: 'txt', text: fullText.substring(i, i + PAGE_CHAR_SIZE) });
+            }
+            document.getElementById('fontBtn').style.display = 'inline-block';
+            renderPage(0);
+          };
+          reader.readAsText(file);
+        } else if (file.name.toLowerCase().endsWith('.zip')) {
+          const zip = await JSZip.loadAsync(file);
+          const entries = [];
+          zip.forEach((path, entry) => { if (!entry.dir) entries.push({ path, entry }); });
+          entries.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
+
+          for (let i = 0; i < entries.length; i++) {
+            const item = entries[i], ext = item.path.split('.').pop().toLowerCase();
+            if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+              const blob = await item.entry.async('blob');
+              pageList.push({ type: 'img', blob });
+            }
+          }
+          document.getElementById('fontBtn').style.display = 'none';
+          renderPage(0);
+        }
+      } catch (err) {
+        alert("파일 오류: " + err.message);
+      } finally {
+        loadingEl.style.display = 'none';
+      }
+    });
+
+    function renderPage(vIndex) {
+      if (vIndex < 0 || vIndex >= pageList.length) return;
+      currentVirtualIndex = vIndex;
+      const page = pageList[vIndex];
+      pageIndicator.innerText = `${vIndex + 1} / ${pageList.length}`;
+
+      if (page.type === 'txt') {
+        contentArea.innerHTML = `<div class="novel-view" id="novelBox" style="font-size:${fontSize}px">${escapeHtml(page.text)}</div>`;
+      } else if (page.type === 'img') {
+        const url = URL.createObjectURL(page.blob);
+        contentArea.innerHTML = `<div class="manga-view"><img class="manga-img" src="${url}"></div>`;
+      }
+    }
+
+    function showToast(msg) { toast.innerText = msg; toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 2000); }
+
+    // 터치 존
+    document.getElementById('touchLeft').addEventListener('click', () => { readRTL ? renderPage(currentVirtualIndex + 1) : renderPage(currentVirtualIndex - 1); });
+    document.getElementById('touchRight').addEventListener('click', () => { readRTL ? renderPage(currentVirtualIndex - 1) : renderPage(currentVirtualIndex + 1); });
+    document.getElementById('touchCenter').addEventListener('click', () => {
+      uiVisible = !uiVisible;
+      header.classList.toggle('hidden', !uiVisible);
+      readerControls.classList.toggle('hidden', !uiVisible);
+    });
+
+    // 스와이프
+    let touchStartX = 0, touchStartY = 0;
+    viewerContainer.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+      }
+    }, { passive: true });
+
+    viewerContainer.addEventListener('touchend', (e) => {
+      if (currentVirtualIndex === -1) return;
+      if (e.changedTouches.length === 1) {
+        const diffX = e.changedTouches[0].clientX - touchStartX;
+        const diffY = e.changedTouches[0].clientY - touchStartY;
+        if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 40) {
+          if (diffX < 0) {
+            readRTL ? renderPage(currentVirtualIndex - 1) : renderPage(currentVirtualIndex + 1);
+          } else {
+            readRTL ? renderPage(currentVirtualIndex + 1) : renderPage(currentVirtualIndex - 1);
+          }
+        }
+      }
+    }, { passive: true });
+
+    // 볼륨키 이벤트
+    document.addEventListener('keydown', (e) => {
+      if (currentVirtualIndex === -1) return;
+      const k = e.key || e.keyCode;
+      if (k === 'VolumeUp' || k === 24 || k === 175) {
+        e.preventDefault();
+        readRTL ? renderPage(currentVirtualIndex - 1) : renderPage(currentVirtualIndex + 1);
+      } else if (k === 'VolumeDown' || k === 25 || k === 174) {
+        e.preventDefault();
+        readRTL ? renderPage(currentVirtualIndex + 1) : renderPage(currentVirtualIndex - 1);
+      }
+    }, true);
+
+    document.getElementById('prevBtn').addEventListener('click', () => { readRTL ? renderPage(currentVirtualIndex + 1) : renderPage(currentVirtualIndex - 1); });
+    document.getElementById('nextBtn').addEventListener('click', () => { readRTL ? renderPage(currentVirtualIndex - 1) : renderPage(currentVirtualIndex + 1); });
+    document.getElementById('fontBtn').addEventListener('click', () => {
+      fontSize = fontSize >= 24 ? 14 : fontSize + 2;
+      const box = document.getElementById('novelBox');
+      if (box) box.style.fontSize = `${fontSize}px`;
+    });
+    function escapeHtml(str) { return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  </script>
+</body>
+</html>
